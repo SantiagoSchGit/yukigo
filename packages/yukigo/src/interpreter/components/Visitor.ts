@@ -83,19 +83,9 @@ import {
   LogicalUnaryTable,
   StringOperationTable,
 } from "./Operations.js";
-import {
-  createGlobalEnv,
-  define,
-  ExpressionEvaluator,
-  lookup,
-  pushEnv,
-  replace,
-} from "../utils.js";
+import { ExpressionEvaluator } from "../utils.js";
 import { LogicEngine } from "./logic/LogicEngine.js";
 import { ErrorFrame, InterpreterError, UnexpectedValue } from "../errors.js";
-import { LazyRuntime } from "./runtimes/LazyRuntime.js";
-import { FunctionRuntime } from "./runtimes/FunctionRuntime.js";
-import { ObjectRuntime } from "./runtimes/ObjectRuntime.js";
 import { EnvBuilderVisitor } from "./EnvBuilder.js";
 import { FailedAssert, TestRunner } from "./TestRunner.js";
 import {
@@ -112,7 +102,6 @@ export class InterpreterVisitor
   implements Visitor<CPSThunk<PrimitiveValue>>, ExpressionEvaluator
 {
   constructor(
-    private env: EnvStack,
     private context: RuntimeContext,
     private frames: ErrorFrame[] = [],
   ) {}
@@ -237,23 +226,14 @@ export class InterpreterVisitor
 
   visitSymbolPrimitive(node: SymbolPrimitive): CPSThunk<PrimitiveValue> {
     try {
-      const val = lookup(this.env, node.value);
+      const val = this.context.lookup(node.value);
       if (isRuntimeFunction(val) && val.arity === 0) {
         if (this.context.config.debug) {
           console.log(
             `[Interpreter] Resolved symbol ${node.value} as arity-0 function, applying...`,
           );
         }
-        return (k) => () =>
-          this.context.funcRuntime.apply(
-            val.identifier ?? "<anon>",
-            val.equations,
-            [],
-            val.closure || this.env,
-            (newEnv) =>
-              new InterpreterVisitor(newEnv, this.context, this.frames),
-            k,
-          );
+        return (k) => () => this.context.funcRuntime.apply(val, [], k);
       }
       return valueToCPS(val);
     } catch (error) {
@@ -272,7 +252,7 @@ export class InterpreterVisitor
     }
     return (k) =>
       this.evaluate(node.expression, (value) => {
-        define(this.env, name, value);
+        this.context.define(name, value);
         return k(true);
       });
   }
@@ -300,7 +280,7 @@ export class InterpreterVisitor
           }
         };
 
-        if (!replace(this.env, name, value, onReplace))
+        if (!this.context.replace(name, value, onReplace))
           throw new InterpreterError(
             "Assignment",
             `Cannot assign to undefined variable: ${name}`,
@@ -363,9 +343,6 @@ export class InterpreterVisitor
     node: ListBinaryOperation,
   ): CPSThunk<PrimitiveValue> {
     if (node.operator === "Concat") {
-      if (this.context.config.lazyLoading) {
-        return (k) => this.context.lazyRuntime.evaluateConcatLazy(node, this, k);
-      }
       return (k) =>
         this.evaluate(node.left, (left) => {
           return () =>
@@ -388,23 +365,6 @@ export class InterpreterVisitor
   visitComparisonOperation(
     node: ComparisonOperation,
   ): CPSThunk<PrimitiveValue> {
-    if (node.operator === "Equal" || node.operator === "NotEqual") {
-      return (k) =>
-        this.evaluate(node.left, (left) => {
-          return () =>
-            this.evaluate(node.right, (right) => {
-              return this.context.lazyRuntime.deepEqual(
-                left,
-                right,
-                (isEqual) => {
-                  const result = node.operator === "Equal" ? isEqual : !isEqual;
-                  return k(result);
-                },
-              );
-            });
-        });
-    }
-
     return this.processBinary(
       node,
       ComparisonOperationTable,
@@ -520,8 +480,8 @@ export class InterpreterVisitor
           }
         };
 
-        if (!replace(this.env, name, value, onReplace)) {
-          define(this.env, name, value);
+        if (!this.context.replace(name, value, onReplace)) {
+          this.context.define(name, value);
         }
 
         return k(true);
@@ -581,15 +541,14 @@ export class InterpreterVisitor
 
   visitLetInExpr(node: LetInExpression): CPSThunk<PrimitiveValue> {
     return (k) => {
-      const newEnv = pushEnv(this.env);
-      const envBuilder = new EnvBuilderVisitor(this.context, newEnv);
+      const oldEnv = this.context.env;
+      this.context.pushEnv();
+      const envBuilder = new EnvBuilderVisitor(this.context);
       node.declarations.accept(envBuilder);
-      const innerVisitor = new InterpreterVisitor(
-        newEnv,
-        this.context,
-        this.frames,
-      );
-      return innerVisitor.evaluate(node.expression, k);
+      return this.evaluate(node.expression, (result) => {
+        this.context.env = oldEnv;
+        return k(result);
+      });
     };
   }
 
@@ -616,29 +575,21 @@ export class InterpreterVisitor
       this.evaluate(node.callee, (callee) => {
         const args: PrimitiveValue[] = [];
         const evaluateArgs = (index: number): Thunk<PrimitiveValue> => {
-          if (index >= node.args.length) {
-            if (isRuntimeFunction(callee)) {
-              if (this.context.config.debug) {
-                console.log(
-                  `[Interpreter] Calling function: ${callee.identifier} with ${args.length} args`,
-                );
-              }
-              return this.context.funcRuntime.apply(
-                callee.identifier,
-                callee.equations,
-                args,
-                callee.closure || this.env,
-                (newEnv) =>
-                  new InterpreterVisitor(newEnv, this.context, this.frames),
-                k,
-              );
-            }
+          if (index < node.args.length)
+            return this.evaluate(node.args[index], (val) => {
+              args.push(val);
+              return () => evaluateArgs(index + 1);
+            });
+
+          if (!isRuntimeFunction(callee))
             throw new InterpreterError("Call", "Target is not a function");
-          }
-          return this.evaluate(node.args[index], (val) => {
-            args.push(val);
-            return () => evaluateArgs(index + 1);
-          });
+
+          if (this.context.config.debug)
+            console.log(
+              `[Interpreter] Calling function: ${callee.identifier} with ${args.length} args`,
+            );
+
+          return this.context.funcRuntime.apply(callee, args, k);
         };
         return evaluateArgs(0);
       });
@@ -689,7 +640,7 @@ export class InterpreterVisitor
 
           const capturedEnv: EnvStack = {
             head: privateScope,
-            tail: this.env,
+            tail: this.context.env,
           };
           return k({
             type: "Function",
@@ -715,7 +666,7 @@ export class InterpreterVisitor
       equations: [equation],
       pendingArgs: [],
       identifier: "<lambda>",
-      closure: this.env,
+      closure: this.context.env,
     });
   }
 
@@ -757,32 +708,25 @@ export class InterpreterVisitor
       typeof arg === "function" ? arg() : arg,
     );
 
-    const executionEnv = func.closure ?? this.env;
+    if (func.closure) this.context.pushEnv(func.closure.head);
     return (cont) => () =>
-      this.context.funcRuntime.apply(
-        func.identifier ?? "<anonymous>",
-        func.equations,
-        evaluatedArgs,
-        executionEnv,
-        (newEnv) => new InterpreterVisitor(newEnv, this.context, this.frames),
-        (result) => {
-          if (remainingArgs.length > 0) {
-            if (isRuntimeFunction(result)) {
-              const nextArgs = result.pendingArgs
-                ? [...result.pendingArgs, ...remainingArgs]
-                : remainingArgs;
+      this.context.funcRuntime.apply(func, evaluatedArgs, (result) => {
+        if (remainingArgs.length > 0) {
+          if (isRuntimeFunction(result)) {
+            const nextArgs = result.pendingArgs
+              ? [...result.pendingArgs, ...remainingArgs]
+              : remainingArgs;
 
-              return this.applyArguments(result, nextArgs)(cont);
-            } else {
-              throw new InterpreterError(
-                "Application",
-                `Too many arguments provided. Result was '${result}' (not a function), but had ${remainingArgs.length} args left.`,
-              );
-            }
+            return this.applyArguments(result, nextArgs)(cont);
+          } else {
+            throw new InterpreterError(
+              "Application",
+              `Too many arguments provided. Result was '${result}' (not a function), but had ${remainingArgs.length} args left.`,
+            );
           }
-          return cont(result);
-        },
-      );
+        }
+        return cont(result);
+      });
   }
 
   visitQuery(node: Query): CPSThunk<PrimitiveValue> {
@@ -835,7 +779,7 @@ export class InterpreterVisitor
       "solutions" in res
     ) {
       for (const [name, val] of (res as any).solutions) {
-        define(this.env, name, val);
+        this.context.define(name, val);
       }
     }
   }
@@ -851,7 +795,7 @@ export class InterpreterVisitor
   visitSuper(node: Super): CPSThunk<PrimitiveValue> {
     let methodName: string;
     try {
-      methodName = lookup(this.env, "__METHOD_NAME__") as string;
+      methodName = this.context.lookup("__METHOD_NAME__") as string;
     } catch (e) {
       throw new InterpreterError(
         "Super",
@@ -868,13 +812,10 @@ export class InterpreterVisitor
             console.log(`[Interpreter] Dispatching super call: ${methodName}`);
           }
           return this.context.objRuntime.dispatchSuper(
-            this.env,
+            this.context.env,
             methodName,
             args,
-            (newEnv) =>
-              new InterpreterVisitor(newEnv, this.context, this.frames),
             k,
-            this,
           );
         }
         return this.evaluate(node.args[index], (val) => {
@@ -899,13 +840,10 @@ export class InterpreterVisitor
               );
             }
             return this.context.objRuntime.dispatchSuper(
-              this.env,
+              this.context.env,
               methodName,
               args,
-              (newEnv) =>
-                new InterpreterVisitor(newEnv, this.context, this.frames),
               k,
-              this,
             );
           }
           return this.evaluate(node.args[index], (val) => {
@@ -930,9 +868,7 @@ export class InterpreterVisitor
               receiver,
               methodName,
               args,
-              this.env,
-              (newEnv) =>
-                new InterpreterVisitor(newEnv, this.context, this.frames),
+              this.context.env,
               k,
             );
           }
@@ -948,7 +884,7 @@ export class InterpreterVisitor
 
   visitNew(node: New): CPSThunk<PrimitiveValue> {
     const className = node.identifier.value;
-    const classDef = lookup(this.env, className);
+    const classDef = this.context.lookup(className);
     if (!isRuntimeClass(classDef))
       throw new InterpreterError(
         "New",
@@ -972,7 +908,7 @@ export class InterpreterVisitor
 
   visitSelf(node: Self): CPSThunk<PrimitiveValue> {
     try {
-      return valueToCPS(lookup(this.env, "self"));
+      return valueToCPS(this.context.lookup("self"));
     } catch {
       throw new InterpreterError(
         "Self",
@@ -1007,7 +943,7 @@ export class InterpreterVisitor
 
                   const item = sourceList[sourceIndex];
                   const varName = current.variable.value;
-                  define(this.env, varName, item);
+                  this.context.define(varName, item);
 
                   return () => process(index + 1);
                 };
@@ -1024,7 +960,7 @@ export class InterpreterVisitor
         }
       };
 
-      pushEnv(this.env);
+      this.context.pushEnv();
       return process(0);
     };
   }
@@ -1044,10 +980,6 @@ export class InterpreterVisitor
 
   visitRangeExpression(node: RangeExpression): CPSThunk<PrimitiveValue> {
     return (k) => this.context.lazyRuntime.evaluateRange(node, this, k);
-  }
-
-  visitTypeCast(node: TypeCast): CPSThunk<PrimitiveValue> {
-    return (k) => this.evaluate(node.expression, k);
   }
 
   visit(node: Expression): CPSThunk<PrimitiveValue> {
@@ -1114,12 +1046,12 @@ export class InterpreterVisitor
   }
 
   private getLogicEngine(): LogicEngine {
-    return new LogicEngine(this.env, this, this.context);
+    return new LogicEngine(this, this.context);
   }
 
   static evaluateLiteral(node: ASTNode): PrimitiveValue {
     const ctx = new RuntimeContext();
-    const visitor = new InterpreterVisitor(createGlobalEnv(), ctx);
+    const visitor = new InterpreterVisitor(ctx);
     return trampoline(visitor.evaluate(node, idContinuation));
   }
 }

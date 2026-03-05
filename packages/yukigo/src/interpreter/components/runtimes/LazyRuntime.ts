@@ -133,7 +133,7 @@ export class LazyRuntime {
       // Eager behavior
       return evaluator.evaluate(node.tail, (tail) => {
         if (typeof tail === "string") {
-          return k(String(head) + tail);
+          return k((head as string) + tail);
         }
         if (isLazyList(tail) || !Array.isArray(tail))
           throw new Error("Expected Array in eager Cons");
@@ -170,56 +170,9 @@ export class LazyRuntime {
     return this.realizeList(left, (lArr) => {
       return () =>
         this.realizeList(right, (rArr) => {
-          const result = lArr.concat(rArr);
-          
-          if (typeof left === "string" && typeof right === "string") {
-            const hasNonString = result.some(c => typeof c !== 'string');
-            if (!hasNonString) {
-                return k(result.join(""));
-            }
-          }
-          return k(result);
+          return k(lArr.concat(rArr));
         });
     });
-  }
-
-  public deepEqual<R = boolean>(
-    a: PrimitiveValue,
-    b: PrimitiveValue,
-    k: Continuation<boolean, R>,
-  ): Thunk<R> {
-    if (a === b) return k(true);
-
-    const compareValues = (valA: any, valB: any): Thunk<R> => {
-      if (typeof valA === "string" && typeof valB === "string")
-        return k(valA === valB);
-
-      if (Array.isArray(valA) && Array.isArray(valB)) {
-        if (valA.length !== valB.length) return k(false);
-        const compareNext = (index: number): Thunk<R> => {
-          if (index >= valA.length) return k(true);
-          return () =>
-            this.deepEqual(valA[index], valB[index], (isEqual) => {
-              if (!isEqual) return k(false);
-              return () => compareNext(index + 1);
-            });
-        };
-        return compareNext(0);
-      }
-
-      return k(valA == valB);
-    };
-
-    if (isLazyList(a) || isLazyList(b)) {
-      return this.realizeList(a, (valA) => {
-        return () =>
-          this.realizeList(b, (valB) => {
-            return () => compareValues(valA, valB);
-          });
-      });
-    }
-
-    return compareValues(a, b);
   }
 
   public evaluateConcatLazy(
