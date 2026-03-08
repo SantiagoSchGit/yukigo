@@ -182,9 +182,6 @@ export class HaskellLayoutLexer implements Lexer {
 
     if (!rawToken) return this.emitEOF();
 
-    // If the token itself crossed lines (like a multiline string),
-    // we should treat the NEXT token as if it crossed a newline for layout purposes.
-    // However, the current token should also be processed for indentation if it's the first on its line.
     
     if (this.state.expectingBlock) return this.handleBlockStart(rawToken);
 
