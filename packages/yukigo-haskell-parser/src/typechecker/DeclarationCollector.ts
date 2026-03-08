@@ -7,6 +7,12 @@ import {
   TestGroup,
   Test,
   Assert,
+  TypeClass,
+  Instance,
+  Equation,
+  TypePattern,
+  SimpleType,
+  ListType,
 } from "yukigo-ast";
 import {
   functionType,
@@ -17,6 +23,7 @@ import {
 } from "./checker.js";
 import { CoreHM } from "./core.js";
 import { TypeBuilder } from "./TypeBuilder.js";
+import { typeMappings } from "../utils/types.js";
 
 const builder = new TypeBuilder(new CoreHM());
 
@@ -83,6 +90,40 @@ export class DeclarationCollectorVisitor implements Visitor<void> {
       this.signatureMap.set(cons.name.value, scheme);
     }
   }
+
+  visitTypeClass(node: TypeClass) {
+    const className = node.name.value;
+    if (!this.coreHM.typeClasses.has(className)) {
+       this.coreHM.typeClasses.set(className, []);
+    }
+
+    // Register method signatures
+    for (const sig of node.signatures) {
+      this.visitTypeSignature(sig);
+    }
+  }
+
+  visitInstance(node: Instance) {
+    const className = node.className.value;
+    let yukigoTypeName = "YuUnknown";
+
+    if (node.type instanceof SimpleType) {
+      yukigoTypeName = typeMappings[node.type.value] || node.type.value;
+    } else if (node.type instanceof ListType) {
+      yukigoTypeName = "YuList";
+    }
+
+    let instances = this.coreHM.typeClasses.get(className);
+    if (!instances) {
+      instances = [];
+      this.coreHM.typeClasses.set(className, instances);
+    }
+
+    if (!instances.includes(yukigoTypeName)) {
+      instances.push(yukigoTypeName);
+    }
+  }
+
   visitTypeSignature(node: TypeSignature) {
     const functionName = node.identifier.value;
     if (this.signatureMap.has(functionName)) {

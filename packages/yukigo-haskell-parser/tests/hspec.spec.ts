@@ -6,6 +6,8 @@ import {
   Assert,
   Equality,
   Truth,
+  Failure,
+  Raise,
   NumberPrimitive,
   SymbolPrimitive,
   Application,
@@ -14,7 +16,7 @@ import {
 } from "yukigo-ast";
 
 describe("HSpec Parsing", () => {
-  const parser = new YukigoHaskellParser("");
+  const parser = new YukigoHaskellParser("", { typecheck: true, includePrims: false });
 
   it("should parse describe and it blocks", () => {
     const code = `
@@ -73,5 +75,18 @@ describe "Math" do
     expect((app.functionExpr as SymbolPrimitive).value).to.equal("odd");
     expect(app.parameter).to.be.instanceOf(NumberPrimitive);
     expect((app.parameter as NumberPrimitive).value).to.equal(5);
+  });
+
+  it("should parse shouldThrow", () => {
+    const code = `it "throws" do error "fail" shouldThrow anyException`;
+    const ast = parser.parse(code);
+    const test = ast[0] as Test;
+    const assert = test.body.statements[0] as Assert;
+    expect(assert.body).to.be.instanceOf(Failure);
+    
+    const failure = assert.body as Failure;
+    expect(failure.func).to.be.instanceOf(Raise);
+    expect(failure.message).to.be.instanceOf(SymbolPrimitive);
+    expect((failure.message as SymbolPrimitive).value).to.equal("anyException");
   });
 });

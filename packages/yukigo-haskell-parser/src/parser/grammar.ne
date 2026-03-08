@@ -54,6 +54,8 @@ import {
   SimpleType,
   ListType,
   TupleType,
+  TypeClass,
+  Instance,
   NumberPrimitive,
   CharPrimitive,
   StringPrimitive,
@@ -84,8 +86,11 @@ declaration -> (function_declaration
                 | function_signature
                 | type_declaration
                 | data_declaration 
+                | typeclass_declaration
+                | instance_declaration
                 | apply_operator
-                | test_declaration) {% (d) => d[0][0] %}
+                | test_declaration
+                | "let" function_declaration) {% (d) => d[0][0] === "let" ? d[0][1] : d[0][0] %}
 
 expression -> 
   (type_cast
@@ -101,6 +106,7 @@ test_declaration ->
     | "describe" expression "$" "do" %lbracket test_body %rbracket {% (d) => new TestGroup(d[1], new Sequence(d[5])) %}
     | "it" expression "do" %lbracket test_body %rbracket {% (d) => new Test(d[1], new Sequence(d[4])) %}
     | "it" expression "$" "do" %lbracket test_body %rbracket {% (d) => new Test(d[1], new Sequence(d[5])) %}
+    | "let" function_declaration {% (d) => d[1] %}
     | assertion {% id %}
 
 test_body -> 
@@ -113,6 +119,8 @@ assertion ->
     | expression "`" "shouldNotBe" "`" expression {% (d) => new Assert(new BooleanPrimitive(true), new Equality(d[4], d[0])) %}
     | expression "shouldSatisfy" expression {% (d) => new Assert(new BooleanPrimitive(false), new Truth(new Application(d[2], d[0]))) %}
     | expression "`" "shouldSatisfy" "`" expression {% (d) => new Assert(new BooleanPrimitive(false), new Truth(new Application(d[4], d[0]))) %}
+    | expression "shouldThrow" expression {% (d) => new Assert(new BooleanPrimitive(false), new Failure(d[0], d[2])) %}
+    | expression "`" "shouldThrow" "`" expression {% (d) => new Assert(new BooleanPrimitive(false), new Failure(d[0], d[4])) %}
 
 
 type_cast -> apply_operator "::" type {% (d) => new TypeCast(d[0], d[2]) %}
@@ -122,7 +130,7 @@ type_cast -> apply_operator "::" type {% (d) => new TypeCast(d[0], d[2]) %}
 
 # priority 0
 apply_operator ->
-    bind_expression "$" apply_operator {% (d) => new Application(d[0], d[2]) %}
+    bind_expression ("$" | "$!") apply_operator {% (d) => new Application(d[0], d[2]) %}
     | bind_expression {% id %}
 
 # priority 1  
@@ -148,7 +156,7 @@ cons_expression ->
     | concatenation {% id %}
 
 concatenation ->
-    addition "++" concatenation {% (d) => d[0] instanceof StringPrimitive || d[2] instanceof StringPrimitive ? new StringOperation("Concat", d[0], d[2]) : new ListBinaryOperation("Concat", d[0], d[2])  %}
+    addition "++" concatenation {% (d) => new ListBinaryOperation("Concat", d[0], d[2])  %}
     | addition {% id %}
 
 # priority 6
@@ -217,6 +225,7 @@ operator_no_minus ->
     | "!!"
     | "/"
     | "$"
+    | "$!"
     | "."
     | ":") {% (d) => d[0][0].value %}
 
@@ -284,6 +293,16 @@ case_expression -> "case" expression "of" "{" case_arms "}" {% (d) => new Switch
 case_arms -> case_arm (";" case_arm):* {% (d) => [d[0], ...d[1].map(x => x[1])] %}
 
 case_arm -> pattern "->" expression {% (d) => new Case(d[0], d[2]) %}
+
+# Type class rules
+
+typeclass_declaration -> "class" constr variable "where" %lbracket typeclass_body %rbracket {% (d) => new TypeClass(d[1], d[2], d[5]) %}
+
+typeclass_body -> function_signature (";" function_signature):* {% (d) => [d[0], ...d[1].map(x => x[1])] %}
+
+instance_declaration -> "instance" constr type "where" %lbracket instance_body %rbracket {% (d) => new Instance(d[1], d[2], d[5]) %}
+
+instance_body -> (function_declaration | function_signature) (";" (function_declaration | function_signature)):* ";":? {% (d) => [d[0][0], ...d[1].map(x => x[1][0])] %}
 
 # Data rules
 
@@ -486,5 +505,15 @@ comparison_operator ->
 primitive -> 
     %number {% ([n]) => new NumberPrimitive(Number(n.value), loc(n)) %}
     | %char {% ([c]) => new CharPrimitive(c.value.slice(1, -1), loc(c)) %}
-    | %string {% ([s]) => new StringPrimitive(s.value.slice(1, -1), loc(s)) %}
+    | %string {% ([s]) => {
+        let val = s.value.slice(1, -1);
+        // Haskell multiline string continuation: \ whitespace \
+        val = val.replace(/\\\s+\\/g, "");
+        // Standard escapes
+        val = val.replace(/\\n/g, "\n")
+                 .replace(/\\t/g, "\t")
+                 .replace(/\\"/g, "\"")
+                 .replace(/\\\\/g, "\\");
+        return new StringPrimitive(val, loc(s));
+    } %}
     | %bool {% ([b]) => new BooleanPrimitive(b.value === 'True' ? true : false, loc(b)) %}

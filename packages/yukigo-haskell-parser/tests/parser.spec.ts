@@ -4,11 +4,14 @@ import { inspect } from "util";
 import {
   Application,
   ArithmeticBinaryOperation,
+  Assert,
+  BooleanPrimitive,
   CharPrimitive,
   ComparisonOperation,
   ConsPattern,
   Constraint,
   Equation,
+  Failure,
   Function,
   GuardedBody,
   If,
@@ -27,6 +30,7 @@ import {
   SimpleType,
   StringPrimitive,
   SymbolPrimitive,
+  Test,
   TypeAlias,
   TypeApplication,
   TypeCast,
@@ -53,7 +57,7 @@ assert.deepEqual = function (actual: any, expected: any, ...args: any[]) {
 describe("Parser Tests", () => {
   let parser: YukigoHaskellParser;
   beforeEach(() => {
-    parser = new YukigoHaskellParser("", { typecheck: false });
+    parser = new YukigoHaskellParser("", { typecheck: false, includePrims: false });
   });
   it("parses boolean expressions", () => {
     const returnExpression = new Return(

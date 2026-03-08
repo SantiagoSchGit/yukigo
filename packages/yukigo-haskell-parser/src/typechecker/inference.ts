@@ -46,6 +46,7 @@ import {
   TupleExpression,
   TuplePattern,
   TypeCast,
+  TypePattern,
   UnifyOperation,
   UnionPattern,
   VariablePattern,
@@ -54,7 +55,7 @@ import {
   Yield,
   Truth,
   Equality,
-  Failure,
+  Failure
 } from "yukigo-ast";
 import {
   Environment,
@@ -317,6 +318,29 @@ export class PatternVisitor implements Visitor<void> {
       this.inferenceEngine,
     ).visit(node.right);
   }
+  visitTypePattern(node: TypePattern) {
+    const builder = new TypeBuilder(this.coreHM)
+    const type = builder.build(node.targetType)
+    const unifyResult = this.coreHM.unify(type.type, this.expectedType);
+    if (unifyResult.success === false)
+      throw new Error(`Pattern type mismatch: ${unifyResult.error}`);
+
+    // If there's an inner pattern, check it against the same expected type
+    if (node.innerPattern) {
+      // Apply substitution from unification to expected type
+      const newExpectedType = this.coreHM.applySubst(
+        unifyResult.value,
+        this.expectedType
+      );
+      new PatternVisitor(
+        this.coreHM,
+        this.signatureMap,
+        newExpectedType,
+        this.envs,
+        this.inferenceEngine
+      ).visit(node.innerPattern);
+    }
+  }
   visit(node: Pattern): void {
     node.accept(this);
   }
@@ -410,6 +434,10 @@ export class InferenceEngine implements Visitor<Result<Type>> {
   visitArithmeticUnaryOperation(node: ArithmeticUnaryOperation): Result<Type> {
     const operandResult = node.operand.accept(this);
     if (!operandResult.success) return operandResult;
+
+    if (node.operator === "ToString") {
+      return { success: true, value: stringType };
+    }
 
     const unifyOperand = this.coreHM.unify(operandResult.value, numberType);
     if (!unifyOperand.success)
@@ -709,6 +737,27 @@ export class InferenceEngine implements Visitor<Result<Type>> {
 
         const rightResult = node.right.accept(this);
         if (!rightResult.success) return rightResult;
+
+        // If either side is a string primitive or already inferred as stringType,
+        // we treat the whole operation as string concatenation.
+        const isString = (t: Type) =>
+          (t.type === "TypeConstructor" && t.name === "YuString") ||
+          (t.type === "TypeConstructor" &&
+            t.name === "List" &&
+            t.args[0].type === "TypeConstructor" &&
+            t.args[0].name === "YuChar");
+
+        if (isString(leftResult.value) || isString(rightResult.value)) {
+          const unifyLeft = this.coreHM.unify(leftResult.value, stringType);
+          const unifyRight = this.coreHM.unify(rightResult.value, stringType);
+          if (unifyLeft.success && unifyRight.success) {
+            return { success: true, value: stringType };
+          }
+          return {
+            success: false,
+            error: "String operation requires string operands",
+          };
+        }
 
         // Create a fresh type variable for the element type
         const elemType = this.coreHM.freshVar();

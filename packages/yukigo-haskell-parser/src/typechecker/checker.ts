@@ -8,11 +8,11 @@ import {
   TestGroup,
   Test,
   Assert,
-  ASTNode,
 } from "yukigo-ast";
 import { InferenceEngine, PatternVisitor } from "./inference.js";
 import { CoreHM } from "./core.js";
 import { DeclarationCollectorVisitor } from "./DeclarationCollector.js";
+import { typeClasses as staticTypeClasses } from "../utils/types.js";
 
 export interface TypeVar {
   type: "TypeVar";
@@ -69,16 +69,12 @@ export const numberType: TypeConstructor = {
   name: "YuNumber",
   args: [],
 };
-export const stringType: TypeConstructor = {
-  type: "TypeConstructor",
-  name: "YuString",
-  args: [],
-};
 export const charType: TypeConstructor = {
   type: "TypeConstructor",
   name: "YuChar",
   args: [],
 };
+export const stringType: Type = listType(charType);
 
 export class FunctionRegistrarVisitor implements Visitor<void> {
   constructor(
@@ -142,7 +138,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
     const inferenceEngine = new InferenceEngine(
       this.signatureMap,
       this.coreHM,
-      this.environments,
+      this.environments
     );
     node.body.accept(inferenceEngine);
   }
@@ -328,7 +324,7 @@ export class TypeChecker {
   }
   check(ast: AST): string[] {
     const typeAliasMap = new Map<string, Type>();
-    this.coreHM = new CoreHM(typeAliasMap);
+    this.coreHM = new CoreHM(typeAliasMap, new Map(staticTypeClasses));
     const recordMap = new Map<string, Type>();
 
     // Phase 1: Collect declarations
@@ -431,10 +427,13 @@ const formatBody = (t: Type, seen: SeenTypeNames): string => {
       ? `(${left}) -> ${right}`
       : `${left} -> ${right}`;
   }
-
-  if (isListType(t)) return `[${formatBody(t.args[0], seen)}]`;
-  if (isTupleType(t))
-    return `(${t.args.map((a) => formatBody(a, seen)).join(", ")})`;
+  if (isListType(t)) {
+    if (t.args[0].type === "TypeConstructor" && t.args[0].name === "YuChar") {
+      return "YuString";
+    }
+    return `[${showType(t.args[0])}]`;
+  }
+  if (isTupleType(t)) return `(${t.args.map(showType.bind(this)).join(", ")})`;
 
   const name = YuNameMap[t.name] || t.name;
   return t.args.length
