@@ -18,6 +18,9 @@ import {
   VariablePattern,
   Visitor,
   WildcardPattern,
+  TypePattern,
+  SimpleType,
+  ListType,
 } from "yukigo-ast";
 import { Bindings } from "../index.js";
 import { InterpreterVisitor } from "./Visitor.js";
@@ -173,6 +176,13 @@ export class PatternResolver implements Visitor<string> {
     return `${alias}@${pattern}`;
   }
 
+  visitTypePattern(node: TypePattern): string {
+    const typeStr = node.targetType.toString();
+    return node.innerPattern
+      ? `(${typeStr} ${node.innerPattern.accept(this)})`
+      : typeStr;
+  }
+
   visit(node: ASTNode): string {
     return node.accept(this);
   }
@@ -263,7 +273,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       if (typeof value === "string") return finishMatching(value.split(""));
 
       if (isLazyList(value)) {
-        return this.ctx.lazyRuntime.realizeList(value, (valArr) => {
+        return this.lazyRuntime.realizeList(value, (valArr) => {
           return () => finishMatching(valArr);
         });
       }
@@ -280,7 +290,11 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
     if (value.length !== elements.length) return k(false);
     const matchNext = (index: number): Thunk<boolean> => {
       if (index >= elements.length) return k(true);
-      const matcher = new PatternMatcher(value[index], this.bindings, this.ctx);
+      const matcher = new PatternMatcher(
+        value[index],
+        this.bindings,
+        this.lazyRuntime,
+      );
       return elements[index].accept(matcher)((isMatch) => {
         if (!isMatch) return k(false);
         return () => matchNext(index + 1);
@@ -294,12 +308,48 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       const [head, tail] = this.resolveCons(this.value);
       if (head === null || tail === null) return k(false);
 
-      const headMatcher = new PatternMatcher(head, this.bindings, this.ctx);
+      const headMatcher = new PatternMatcher(
+        head,
+        this.bindings,
+        this.lazyRuntime,
+      );
       return node.left.accept(headMatcher)((headMatches) => {
         if (!headMatches) return k(false);
-        const tailMatcher = new PatternMatcher(tail, this.bindings, this.ctx);
+        const tailMatcher = new PatternMatcher(
+          tail,
+          this.bindings,
+          this.lazyRuntime,
+        );
         return node.right.accept(tailMatcher)(k);
       });
+    };
+  }
+
+  visitTypePattern(node: TypePattern): CPSThunk<boolean> {
+    return (k) => {
+      const actualType = getYukigoType(this.value);
+
+      let matches = false;
+      const targetType = node.targetType;
+
+      if (targetType instanceof SimpleType) {
+        matches = targetType.value === actualType;
+      } else if (targetType instanceof ListType) {
+        matches = actualType === "YuList";
+      }
+
+      if (!matches) return k(false);
+
+      if (node.innerPattern) {
+        const innerMatcher = new PatternMatcher(
+          this.value,
+          this.bindings,
+          this.lazyRuntime,
+        );
+        return node.innerPattern.accept(innerMatcher)(k);
+      }
+
+      return k(true);
     };
   }
 
@@ -330,6 +380,9 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       };
       return [list[0], tail];
     }
+
+    if (typeof list === "string")
+      return list.length === 0 ? [null, null] : [list[0], list.slice(1)];
 
     // lazy list case
     if (isLazyList(list)) {
@@ -426,38 +479,6 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
     b: PrimitiveValue,
     k: Continuation<boolean>,
   ): Thunk<boolean> {
-    if (a === b) return k(true);
-
-    const compareValues = (valA: any, valB: any): Thunk<boolean> => {
-      if (typeof valA === "string" && typeof valB === "string")
-        return k(valA === valB);
-
-      if (typeof valA !== typeof valB) return k(false);
-
-      if (Array.isArray(valA) && Array.isArray(valB)) {
-        if (valA.length !== valB.length) return k(false);
-        const compareNext = (index: number): Thunk<boolean> => {
-          if (index >= valA.length) return k(true);
-          return this.deepEqual(valA[index], valB[index], (isEqual) => {
-            if (!isEqual) return k(false);
-            return () => compareNext(index + 1);
-          });
-        };
-        return compareNext(0);
-      }
-
-      return k(false);
-    };
-
-    if (isLazyList(a) || isLazyList(b)) {
-      return this.ctx.lazyRuntime.realizeList(a, (valA) => {
-        return () =>
-          this.ctx.lazyRuntime.realizeList(b, (valB) => {
-            return () => compareValues(valA, valB);
-          });
-      });
-    }
-
-    return compareValues(a, b);
+    return this.lazyRuntime.deepEqual(a, b, k);
   }
 }

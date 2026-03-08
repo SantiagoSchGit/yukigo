@@ -27,6 +27,7 @@ import {
   UnionPattern,
   AsPattern,
   PatternVisitor,
+  TypePattern,
   AssignOperation,
   ArithmeticBinaryOperation,
   ArithmeticUnaryOperation,
@@ -49,14 +50,11 @@ import {
   NilPrimitive,
   CharPrimitive,
   Visitor,
-  GuardedBody,
-  isUnguardedBody,
 } from "yukigo-ast";
+import { lookup } from "../../utils.js";
 import { InterpreterError } from "../../errors.js";
 import { Thunk } from "../../trampoline.js";
 import { LogicExecutable } from "./LogicEngine.js";
-import { RuntimeContext } from "../RuntimeContext.js";
-import { inspect } from "util";
 
 /**
  * A Substitution maps variable names to their bound patterns.
@@ -288,6 +286,14 @@ class Instantiator implements PatternVisitor<Pattern> {
     );
   }
 
+  visitTypePattern(node: TypePattern): Pattern {
+    return new TypePattern(
+      node.targetType,
+      node.innerPattern ? this.instantiate(node.innerPattern) : undefined,
+      node.loc,
+    );
+  }
+
   instantiate(pattern: Pattern): Pattern {
     return pattern.accept(this);
   }
@@ -306,13 +312,7 @@ export function instantiate(
 
 let variableCounter = 0;
 
-interface RenamerVisitor {
-  visitFact(node: Fact): Fact;
-  visitRule(node: Rule): Rule;
-  visitUnguardedBody(node: UnguardedBody): UnguardedBody;
-}
-
-class LogicVariableRenamer implements PatternVisitor<Pattern>, RenamerVisitor {
+class LogicVariableRenamer implements PatternVisitor<Pattern> {
   constructor(
     private renames: Map<string, string>,
     private freshId: number,
@@ -437,6 +437,14 @@ class LogicVariableRenamer implements PatternVisitor<Pattern>, RenamerVisitor {
     );
   }
 
+  visitTypePattern(node: TypePattern): Pattern {
+    return new TypePattern(
+      node.targetType,
+      node.innerPattern ? this.rename(node.innerPattern) : undefined,
+      node.loc,
+    );
+  }
+
   // Expression/Statement Visitor
   visitSymbolPrimitive(node: SymbolPrimitive): any {
     const name = node.value;
@@ -493,11 +501,7 @@ class LogicVariableRenamer implements PatternVisitor<Pattern>, RenamerVisitor {
   }
 
   visitForall(node: Forall): any {
-    return new Forall(
-      this.rename(node.condition),
-      this.rename(node.action),
-      node.loc,
-    );
+    return new Forall(this.rename(node.condition), this.rename(node.action), node.loc);
   }
 
   visitCall(node: Call): any {
