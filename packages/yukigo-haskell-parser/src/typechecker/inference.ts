@@ -88,7 +88,7 @@ export class PatternVisitor implements Visitor<void> {
     private signatureMap: Map<string, TypeScheme>,
     private expectedType: Type,
     private envs: Environment[],
-    private inferenceEngine: InferenceEngine
+    private inferenceEngine: InferenceEngine,
   ) {}
 
   visitVariablePattern(node: VariablePattern) {
@@ -115,8 +115,8 @@ export class PatternVisitor implements Visitor<void> {
     if (unifyResult.success === false)
       throw new Error(
         `Literal pattern type mismatch: expected ${showType(
-          this.expectedType
-        )} but found ${showType(literalType)}`
+          this.expectedType,
+        )} but found ${showType(literalType)}`,
       );
   }
   visitApplicationPattern(node: ApplicationPattern) {
@@ -138,8 +138,8 @@ export class PatternVisitor implements Visitor<void> {
           this.signatureMap,
           argType,
           this.envs,
-          this.inferenceEngine
-        )
+          this.inferenceEngine,
+        ),
       );
     });
 
@@ -147,7 +147,7 @@ export class PatternVisitor implements Visitor<void> {
     const unifyResult = this.coreHM.unify(currentType, this.expectedType);
     if (unifyResult.success === false)
       throw new Error(
-        `Constructor ${node.identifier.value} arguments don't match expected type: ${unifyResult.error}`
+        `Constructor ${node.identifier.value} arguments don't match expected type: ${unifyResult.error}`,
       );
   }
   visitTuplePattern(node: TuplePattern) {
@@ -171,8 +171,8 @@ export class PatternVisitor implements Visitor<void> {
     } else {
       throw new Error(
         `Pattern expects a tuple but found non-tuple type: ${showType(
-          this.expectedType
-        )}`
+          this.expectedType,
+        )}`,
       );
     }
 
@@ -182,7 +182,7 @@ export class PatternVisitor implements Visitor<void> {
         this.signatureMap,
         tupleElementTypes[i],
         this.envs,
-        this.inferenceEngine
+        this.inferenceEngine,
       ).visit(pattern);
     });
   }
@@ -207,7 +207,7 @@ export class PatternVisitor implements Visitor<void> {
         this.signatureMap,
         elemType,
         this.envs,
-        this.inferenceEngine
+        this.inferenceEngine,
       ).visit(pat);
     });
   }
@@ -221,7 +221,7 @@ export class PatternVisitor implements Visitor<void> {
       this.signatureMap,
       this.expectedType,
       this.envs,
-      this.inferenceEngine
+      this.inferenceEngine,
     ).visit(node.right);
 
     // Process the alias if it's a variable
@@ -249,7 +249,8 @@ export class PatternVisitor implements Visitor<void> {
   }
   visitConstructorPattern(node: ConstructorPattern) {
     const ctorScheme = this.signatureMap.get(node.identifier.value);
-    if (!ctorScheme) throw new Error(`Unknown constructor: ${node.identifier.value}`);
+    if (!ctorScheme)
+      throw new Error(`Unknown constructor: ${node.identifier.value}`);
 
     const ctorType = this.coreHM.instantiate(ctorScheme);
     // Extract argument types and return type from constructor
@@ -258,7 +259,7 @@ export class PatternVisitor implements Visitor<void> {
 
     if (argTypes.length !== node.args.length)
       throw new Error(
-        `Constructor ${node.identifier.value} expects ${argTypes.length} arguments but pattern has ${node.args.length}`
+        `Constructor ${node.identifier.value} expects ${argTypes.length} arguments but pattern has ${node.args.length}`,
       );
 
     // Unify the constructor's return type with expected pattern type
@@ -266,14 +267,14 @@ export class PatternVisitor implements Visitor<void> {
     if (!unifyResult.success)
       throw new Error(
         `Constructor ${node.identifier.value} return type ${showType(
-          returnType
-        )} doesn't match expected type ${showType(this.expectedType)}`
+          returnType,
+        )} doesn't match expected type ${showType(this.expectedType)}`,
       );
 
     // Apply substitutions to argument types
     const subst = unifyResult.value;
     const unifiedArgTypes = argTypes.map((argType) =>
-      this.coreHM.applySubst(subst, argType)
+      this.coreHM.applySubst(subst, argType),
     );
 
     // Process each argument pattern with its correct type
@@ -283,7 +284,7 @@ export class PatternVisitor implements Visitor<void> {
         this.signatureMap,
         unifiedArgTypes[i],
         this.envs,
-        this.inferenceEngine
+        this.inferenceEngine,
       ).visit(pattern);
     });
   }
@@ -305,7 +306,7 @@ export class PatternVisitor implements Visitor<void> {
       this.signatureMap,
       unifiedElemType,
       this.envs,
-      this.inferenceEngine
+      this.inferenceEngine,
     ).visit(node.left);
     // Process tail pattern with a list of the same element type
     const tailType = listType(unifiedElemType);
@@ -314,7 +315,7 @@ export class PatternVisitor implements Visitor<void> {
       this.signatureMap,
       tailType,
       this.envs,
-      this.inferenceEngine
+      this.inferenceEngine,
     ).visit(node.right);
   }
   visitTypePattern(node: TypePattern) {
@@ -349,7 +350,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
   constructor(
     private signatureMap: Map<string, TypeScheme>,
     private coreHM: CoreHM,
-    private envs: Environment[]
+    private envs: Environment[],
   ) {}
   visitNumberPrimitive(node: NumberPrimitive): Result<Type> {
     return {
@@ -389,7 +390,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
       if (elemResult.success === false) return elemResult;
       const unifyResult = this.coreHM.unify(
         elemResult.value,
-        firstResult.value
+        firstResult.value,
       );
       if (unifyResult.success === false) {
         return {
@@ -448,7 +449,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     return { success: true, value: numberType };
   }
   visitArithmeticBinaryOperation(
-    node: ArithmeticBinaryOperation
+    node: ArithmeticBinaryOperation,
   ): Result<Type> {
     const leftResult = node.left.accept(this);
     if (!leftResult.success) return leftResult;
@@ -501,7 +502,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         const listInputType: TypeConstructor = listType(freshInputVar);
         const unifyOperand = this.coreHM.unify(
           operandResult.value,
-          listInputType
+          listInputType,
         );
 
         if (!unifyOperand.success)
@@ -554,7 +555,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         const freshOutputVar = this.coreHM.freshVar();
         const funcType: TypeConstructor = functionType(
           elementType,
-          freshOutputVar
+          freshOutputVar,
         );
 
         const unifyLeft = this.coreHM.unify(leftResult.value, funcType);
@@ -564,7 +565,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
             error: `${
               node.operator
             }'s left operand must be a function of type ${showType(
-              elementType
+              elementType,
             )} -> a`,
           };
         }
@@ -609,7 +610,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         // Left-hand side must be a function: elementType -> Bool
         const funcType: TypeConstructor = functionType(
           elementType,
-          booleanType
+          booleanType,
         );
         const unifyLeft = this.coreHM.unify(leftResult.value, funcType);
         if (!unifyLeft.success) {
@@ -661,7 +662,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         // Left-hand side must be a function: elementType -> Bool
         const funcType: TypeConstructor = functionType(
           elementType,
-          booleanType
+          booleanType,
         );
         const unifyLeft = this.coreHM.unify(leftResult.value, funcType);
         if (!unifyLeft.success) {
@@ -711,7 +712,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         // Left-hand side must be a function: elementType -> Bool
         const funcType: TypeConstructor = functionType(
           elementType,
-          booleanType
+          booleanType,
         );
         const unifyLeft = this.coreHM.unify(leftResult.value, funcType);
         if (!unifyLeft.success) {
@@ -768,7 +769,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
           return {
             success: false,
             error: `Left operand of concat must be a list, got ${showType(
-              leftResult.value
+              leftResult.value,
             )}`,
           };
         }
@@ -778,7 +779,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         const substElemType = this.coreHM.applySubst(unifyLeft.value, elemType);
         const substRightType = this.coreHM.applySubst(
           unifyLeft.value,
-          rightResult.value
+          rightResult.value,
         );
         const expectedRightType = listType(substElemType);
 
@@ -794,11 +795,11 @@ export class InferenceEngine implements Visitor<Result<Type>> {
         // Combine substitutions and apply to get final result type
         const combinedSubst = this.coreHM.composeSubst(
           unifyRight.value,
-          unifyLeft.value
+          unifyLeft.value,
         );
         const finalType = this.coreHM.applySubst(
           combinedSubst,
-          listType(elemType)
+          listType(elemType),
         );
 
         return { success: true, value: finalType };
@@ -820,7 +821,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
           return {
             success: false,
             error: `Left operand of concat must be a list, got ${showType(
-              leftResult.value
+              leftResult.value,
             )}`,
           };
         }
@@ -831,7 +832,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
           return {
             success: false,
             error: `${node.operator}'s left operand must be a ${showType(
-              numberType
+              numberType,
             )}`,
           };
         }
@@ -970,7 +971,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
 
       const unifyResult = this.coreHM.unify(
         argResult.value,
-        currentType.args[0]
+        currentType.args[0],
       );
       if (!unifyResult.success) {
         return {
@@ -1009,7 +1010,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     // Head must match list element type
     const headUnifyResult = this.coreHM.unify(
       headResult.value,
-      unifiedElemType
+      unifiedElemType,
     );
     if (headUnifyResult.success === false) {
       return {
@@ -1028,14 +1029,19 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     const signatureMap = new Map();
     node.declarations.statements.forEach((stmt) =>
       stmt.accept(
-        new FunctionRegistrarVisitor(this.envs[0], signatureMap, this.coreHM)
-      )
+        new FunctionRegistrarVisitor(this.envs[0], signatureMap, this.coreHM),
+      ),
     );
     const errors = [];
     node.declarations.statements.forEach((stmt) =>
       stmt.accept(
-        new FunctionCheckerVisitor(this.envs, signatureMap, this.coreHM, errors)
-      )
+        new FunctionCheckerVisitor(
+          this.envs,
+          signatureMap,
+          this.coreHM,
+          errors,
+        ),
+      ),
     );
     if (errors.length > 0) {
       return { success: false, error: errors.join() };
@@ -1092,8 +1098,8 @@ export class InferenceEngine implements Visitor<Result<Type>> {
             this.signatureMap,
             paramTypes[i],
             this.envs,
-            this
-          )
+            this,
+          ),
         );
       } catch (error) {
         return {
@@ -1107,7 +1113,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     const inferrer = new InferenceEngine(
       this.signatureMap,
       this.coreHM,
-      this.envs
+      this.envs,
     );
     const bodyResult = node.body.accept(inferrer);
     if (!bodyResult.success) return bodyResult;
@@ -1115,7 +1121,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     // Construct function type
     const funcType = paramTypes.reduceRight(
       (acc, param) => functionType(param, acc),
-      bodyResult.value
+      bodyResult.value,
     );
 
     return { success: true, value: funcType };
@@ -1134,13 +1140,13 @@ export class InferenceEngine implements Visitor<Result<Type>> {
       return {
         success: false,
         error: `Cannot apply ${showType(argResult.value)} to type ${showType(
-          funcResult.value
+          funcResult.value,
         )}`,
       };
     }
     const substResultType = this.coreHM.applySubst(
       unifyResult.value,
-      resultType
+      resultType,
     );
     return { success: true, value: substResultType };
   }
@@ -1179,7 +1185,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
       return {
         success: false,
         error: `Branch types don't match: ${showType(
-          thenResult.value
+          thenResult.value,
         )} vs ${showType(elseResult.value)}`,
       };
 
@@ -1216,7 +1222,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
       if (inferGenResult.success === false) return inferGenResult;
       const unifyGenResult = this.coreHM.unify(
         inferGenResult.value,
-        booleanType
+        booleanType,
       );
       if (unifyGenResult.success === false) return unifyGenResult;
     }
@@ -1268,8 +1274,8 @@ export class InferenceEngine implements Visitor<Result<Type>> {
           this.signatureMap,
           caseResult.value,
           this.envs,
-          this
-        )
+          this,
+        ),
       );
     } catch (error) {
       return { success: false, error: error.message };
@@ -1289,8 +1295,8 @@ export class InferenceEngine implements Visitor<Result<Type>> {
             this.signatureMap,
             caseResult.value,
             this.envs,
-            this
-          )
+            this,
+          ),
         );
       } catch (error) {
         return { success: false, error: error.message };
@@ -1301,7 +1307,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
 
       const unifyBranchResult = this.coreHM.unify(
         firstBranchType.value,
-        branchType.value
+        branchType.value,
       );
       if (unifyBranchResult.success === false) return unifyBranchResult;
     }
@@ -1310,9 +1316,14 @@ export class InferenceEngine implements Visitor<Result<Type>> {
   visitRangeExpression(node: RangeExpression): Result<Type> {
     const startResult = node.start.accept(this);
     if (!startResult.success) return startResult;
-
-    const endResult = node.end.accept(this);
-    if (!endResult.success) return endResult;
+    let endResult: Result<Type> = {
+      success: true,
+      value: this.coreHM.freshVar(),
+    };
+    if (node.end) {
+      endResult = node.end.accept(this);
+      if (!endResult.success) return endResult;
+    }
     const rangeElemType = this.coreHM.freshVar(["Ord", "Enum"]);
 
     // Unify both start and end with this constrained type
@@ -1321,7 +1332,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
       return {
         success: false,
         error: `Range start must be of an enumerable and orderable type, got ${showType(
-          startResult.value
+          startResult.value,
         )}`,
       };
     }
@@ -1329,17 +1340,17 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     // Apply substitution from start unification to end type before unifying
     const substitutedEnd = this.coreHM.applySubst(
       unifyStart.value,
-      endResult.value
+      endResult.value,
     );
     const unifyEnd = this.coreHM.unify(
       substitutedEnd,
-      this.coreHM.applySubst(unifyStart.value, rangeElemType)
+      this.coreHM.applySubst(unifyStart.value, rangeElemType),
     );
     if (!unifyEnd.success) {
       return {
         success: false,
         error: `Range end must match start type; expected ${showType(
-          startResult.value
+          startResult.value,
         )}, got ${showType(endResult.value)}`,
       };
     }
@@ -1347,7 +1358,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
     // Combine substitutions
     const combinedSubst = this.coreHM.composeSubst(
       unifyEnd.value,
-      unifyStart.value
+      unifyStart.value,
     );
     const finalElemType = this.coreHM.applySubst(combinedSubst, rangeElemType);
 
@@ -1396,7 +1407,7 @@ export class InferenceEngine implements Visitor<Result<Type>> {
 
 const searchInEnvironments = (
   envs: Environment[],
-  key: string
+  key: string,
 ): Result<TypeScheme> => {
   let result;
   for (const env of envs) {

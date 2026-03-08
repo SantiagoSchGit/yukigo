@@ -80,7 +80,7 @@ export class FunctionRegistrarVisitor implements Visitor<void> {
   constructor(
     private env: Environment,
     private signatureMap: Map<string, TypeScheme>,
-    private coreHM: CoreHM
+    private coreHM: CoreHM,
   ) {}
   visitSequence(node: Sequence): void {
     node.statements.forEach((stmt) => stmt.accept(this));
@@ -126,7 +126,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
     private environments: Environment[],
     private signatureMap: Map<string, TypeScheme>,
     private coreHM: CoreHM,
-    private errors: string[]
+    private errors: string[],
   ) {}
   visitTestGroup(node: TestGroup): void {
     node.group.accept(this);
@@ -152,7 +152,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
       const inferenceEngine = new InferenceEngine(
         this.signatureMap,
         this.coreHM,
-        this.environments
+        this.environments,
       );
       const paramTypes = firstEq.patterns.map(() => this.coreHM.freshVar());
 
@@ -163,7 +163,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
             this.signatureMap,
             type,
             this.environments,
-            inferenceEngine
+            inferenceEngine,
           ).visit(firstEq.patterns[i]);
         } catch (error) {
           this.errors.push(`Type error in '${functionName}': ${error.message}`);
@@ -179,16 +179,16 @@ export class FunctionCheckerVisitor implements Visitor<void> {
               this.environments,
               this.signatureMap,
               this.coreHM,
-              this.errors
-            )
-          )
+              this.errors,
+            ),
+          ),
         );
         const returnResult = equationStatements
           .find((stmt) => stmt instanceof Return)
           .accept(inferenceEngine);
         if (returnResult.success === false) {
           this.errors.push(
-            `Type error in '${functionName}': ${returnResult.error}`
+            `Type error in '${functionName}': ${returnResult.error}`,
           );
           return;
         }
@@ -200,7 +200,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
 
       const fullFuncType = paramTypes.reduceRight(
         (acc, param) => functionType(param, acc),
-        inferredBodyType
+        inferredBodyType,
       );
 
       // Generalize the inferred type to create a polymorphic type scheme
@@ -214,7 +214,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
     for (const [index, equation] of node.equations.entries()) {
       if (equation.patterns.length > expectedArity) {
         this.errors.push(
-          `Type error in '${functionName}': Too many parameters in equation ${index}. Expected max ${expectedArity}, got ${equation.patterns.length}`
+          `Type error in '${functionName}': Too many parameters in equation ${index}. Expected max ${expectedArity}, got ${equation.patterns.length}`,
         );
         continue;
       }
@@ -237,7 +237,7 @@ export class FunctionCheckerVisitor implements Visitor<void> {
         const inferenceEngine = new InferenceEngine(
           this.signatureMap,
           this.coreHM,
-          this.environments
+          this.environments,
         );
         equation.patterns.forEach((pattern, i) => {
           const argType = patternTypes[i]; // El tipo correspondiente a este patrón
@@ -248,12 +248,12 @@ export class FunctionCheckerVisitor implements Visitor<void> {
                 this.signatureMap,
                 argType,
                 this.environments,
-                inferenceEngine
-              )
+                inferenceEngine,
+              ),
             );
           } catch (error) {
             this.errors.push(
-              `Type error in '${functionName}': ${error.message}`
+              `Type error in '${functionName}': ${error.message}`,
             );
           }
         });
@@ -265,16 +265,16 @@ export class FunctionCheckerVisitor implements Visitor<void> {
                 this.environments,
                 this.signatureMap,
                 this.coreHM,
-                this.errors
-              )
-            )
+                this.errors,
+              ),
+            ),
           );
           const returnResult = equationStatements
             .find((stmt) => stmt instanceof Return)
             .accept(inferenceEngine);
           if (returnResult.success === false) {
             this.errors.push(
-              `Type error in '${functionName}': ${returnResult.error}`
+              `Type error in '${functionName}': ${returnResult.error}`,
             );
             return;
           }
@@ -290,13 +290,13 @@ export class FunctionCheckerVisitor implements Visitor<void> {
 
             const conditionSub = this.coreHM.unify(
               condition.value,
-              booleanType
+              booleanType,
             );
             if (conditionSub.success === false) throw Error(conditionSub.error);
             let body = guard.body;
             if (guard.body instanceof Sequence) {
               body = guard.body.statements.find(
-                (stmt) => stmt instanceof Return
+                (stmt) => stmt instanceof Return,
               );
             }
             const bodyResult = body.accept(inferenceEngine);
@@ -333,7 +333,7 @@ export class TypeChecker {
       typeAliasMap,
       recordMap,
       this.signatureMap,
-      this.coreHM
+      this.coreHM,
     );
     for (const node of ast) {
       try {
@@ -350,13 +350,31 @@ export class TypeChecker {
 
     return this.errors;
   }
+  public inferExpression(expr: ASTNode): string {
+    if (!this.coreHM || !this.signatureMap)
+      throw new Error("Environment not initialized.");
+
+    const globalEnv = new Map<string, TypeScheme>(this.signatureMap);
+    const inferenceEngine = new InferenceEngine(
+      this.signatureMap,
+      this.coreHM,
+      [globalEnv],
+    );
+    const result = expr.accept(inferenceEngine);
+    if (result.success === false) throw new Error(result.error);
+
+    return showType(result.value);
+  }
+  public getKnownSymbols(): string[] {
+    return Array.from(this.signatureMap.keys());
+  }
   inferencePass(ast: AST): void {
     // Step 1: Register all functions in env
     const globalEnv = new Map<string, TypeScheme>(this.signatureMap);
     const visitor1 = new FunctionRegistrarVisitor(
       globalEnv,
       this.signatureMap,
-      this.coreHM
+      this.coreHM,
     );
     for (const node of ast) {
       node.accept(visitor1);
@@ -366,7 +384,7 @@ export class TypeChecker {
       [globalEnv],
       this.signatureMap,
       this.coreHM,
-      this.errors
+      this.errors,
     );
     for (const node of ast) {
       node.accept(visitor2);
@@ -374,14 +392,40 @@ export class TypeChecker {
   }
 }
 
-export function showType(t: Type): string {
-  if (t.type === "TypeVar") return t.name ?? `t${t.id}`;
+type SeenTypeNames = Map<number, string>;
+const YuNameMap = {
+  YuNumber: "Number",
+  YuString: "String",
+  YuBoolean: "Bool",
+  YuChar: "Char",
+};
+const getVarName = (
+  id: number,
+  name: string | undefined,
+  seen: SeenTypeNames,
+): string => {
+  if (name) return name;
+  if (seen.has(id)) return seen.get(id)!;
+
+  const index = seen.size;
+  const letter = String.fromCharCode(97 + (index % 26));
+  const suffix = index >= 26 ? Math.floor(index / 26).toString() : "";
+  const generatedName = `${letter}${suffix}`;
+
+  seen.set(id, generatedName);
+  return generatedName;
+};
+const collectTypeVars = (t: Type): TypeVar[] =>
+  t.type === "TypeVar" ? [t] : t.args.flatMap(collectTypeVars);
+const formatBody = (t: Type, seen: SeenTypeNames): string => {
+  if (t.type === "TypeVar") return getVarName(t.id, t.name, seen);
 
   if (isFunctionType(t)) {
-    const a = showType(t.args[0]);
-    const b = showType(t.args[1]);
-    const aDisp = isFunctionType(t.args[0]) ? `(${a})` : a;
-    return `${aDisp} -> ${b}`;
+    const left = formatBody(t.args[0], seen);
+    const right = formatBody(t.args[1], seen);
+    return isFunctionType(t.args[0])
+      ? `(${left}) -> ${right}`
+      : `${left} -> ${right}`;
   }
   if (isListType(t)) {
     if (t.args[0].type === "TypeConstructor" && t.args[0].name === "YuChar") {
@@ -391,9 +435,25 @@ export function showType(t: Type): string {
   }
   if (isTupleType(t)) return `(${t.args.map(showType.bind(this)).join(", ")})`;
 
+  const name = YuNameMap[t.name] || t.name;
   return t.args.length
-    ? `${t.name} ${t.args.map(showType.bind(this)).join(" ")}`
-    : t.name;
+    ? `${name} ${t.args.map((a) => formatBody(a, seen)).join(" ")}`
+    : name;
+};
+
+export function showType(t: Type, seen: SeenTypeNames = new Map()): string {
+  const bodyStr = formatBody(t, seen);
+  const constraints = Array.from(
+    new Set(
+      collectTypeVars(t).flatMap(({ constraints, id, name }) =>
+        constraints.map((c) => `${c} ${getVarName(id, name, seen)}`),
+      ),
+    ),
+  );
+  if (constraints.length === 0) return bodyStr;
+  const context =
+    constraints.length === 1 ? constraints[0] : `(${constraints.join(", ")})`;
+  return `${context} => ${bodyStr}`;
 }
 
 export function getReturnType(type: Type): Type {
