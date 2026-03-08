@@ -93,10 +93,8 @@ export class DeclarationCollectorVisitor implements Visitor<void> {
 
   visitTypeClass(node: TypeClass) {
     const className = node.name.value;
-    if (this.coreHM.typeClasses.has(className)) {
-      // It's fine if it's already there (it might be a built-in one)
-    } else {
-      this.coreHM.typeClasses.set(className, []);
+    if (!this.coreHM.typeClasses.has(className)) {
+       this.coreHM.typeClasses.set(className, []);
     }
 
     // Register method signatures
