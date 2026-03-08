@@ -137,11 +137,7 @@ export class FunctionRuntime {
   ): Thunk<boolean> {
     const matchNext = (index: number): Thunk<boolean> => {
       if (index >= args.length) return k(true);
-      const matcher = new PatternMatcher(
-        args[index],
-        bindings,
-        this.context.lazyRuntime,
-      );
+      const matcher = new PatternMatcher(args[index], bindings, this.context);
       return eq.patterns[index].accept(matcher)((isMatch) => {
         if (!isMatch) return k(false);
         return () => matchNext(index + 1);

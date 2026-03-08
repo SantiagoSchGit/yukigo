@@ -225,15 +225,25 @@ export class InterpreterVisitor
   }
 
   visitSymbolPrimitive(node: SymbolPrimitive): CPSThunk<PrimitiveValue> {
+    if (this.context.config.debug) {
+      console.log(
+        `[Interpreter] Looking for \`${node.value}\` in the environment`,
+      );
+    }
     try {
       const val = this.context.lookup(node.value);
       if (isRuntimeFunction(val) && val.arity === 0) {
         if (this.context.config.debug) {
           console.log(
-            `[Interpreter] Resolved symbol ${node.value} as arity-0 function, applying...`,
+            `[Interpreter] Resolved symbol \`${node.value}\` as arity-0 function, applying...`,
           );
         }
         return (k) => () => this.context.funcRuntime.apply(val, [], k);
+      }
+      if (this.context.config.debug) {
+        console.log(
+          `[Interpreter] Found \`${node.value}\`: ${typeof val === "object" && "type" in val ? val.type : val}`,
+        );
       }
       return valueToCPS(val);
     } catch (error) {
@@ -671,6 +681,9 @@ export class InterpreterVisitor
   }
 
   visitApplication(node: Application): CPSThunk<PrimitiveValue> {
+    if (this.context.config.debug) {
+      console.log(`[Interpreter] Visiting Application`);
+    }
     return (k) =>
       this.evaluate(node.functionExpr, (func) => {
         if (!isRuntimeFunction(func))
@@ -730,6 +743,11 @@ export class InterpreterVisitor
   }
 
   visitQuery(node: Query): CPSThunk<PrimitiveValue> {
+    if (this.context.config.debug) {
+      console.log(
+        `[Interpreter] Visiting Query.`,
+      );
+    }
     return (k) =>
       this.getLogicEngine().solveQuery(node, (res) => {
         this.bindLogicResults(res);
@@ -778,7 +796,7 @@ export class InterpreterVisitor
       res.success &&
       "solutions" in res
     ) {
-      for (const [name, val] of (res as any).solutions) {
+      for (const [name, val] of res.solutions) {
         this.context.define(name, val);
       }
     }

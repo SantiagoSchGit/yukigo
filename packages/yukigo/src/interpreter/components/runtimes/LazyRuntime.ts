@@ -4,9 +4,14 @@ import {
   ConsExpression,
   isLazyList,
   ListBinaryOperation,
+  LazyList,
 } from "yukigo-ast";
 import { ExpressionEvaluator } from "../../utils.js";
-import { createMemoizedStream } from "../PatternMatcher.js";
+import {
+  createMemoizedStream,
+  InternalConsState,
+  isMemoizedList,
+} from "../PatternMatcher.js";
 import {
   Continuation,
   idContinuation,
@@ -69,12 +74,24 @@ export class LazyRuntime {
           if (typeof endVal !== "number")
             throw new Error("Range end must be a number");
 
+          const cond =
+            step > 0 ? (c: number) => c <= endVal : (c: number) => c >= endVal;
+
+          if (this.context.config.lazyLoading) {
+            return k(
+              createMemoizedStream(function* () {
+                let current = startVal;
+                while (cond(current)) {
+                  yield current;
+                  current += step;
+                }
+              }),
+            );
+          }
+
           const result: number[] = [];
           let current = startVal;
-          const cond =
-            step > 0 ? () => current <= endVal : () => current >= endVal;
-
-          while (cond()) {
+          while (cond(current)) {
             result.push(current);
             current += step;
           }
@@ -103,38 +120,69 @@ export class LazyRuntime {
   ): Thunk<PrimitiveValue> {
     return evaluator.evaluate(node.head, (head) => {
       if (this.context.config.lazyLoading) {
-        return k(
-          createMemoizedStream(function* () {
-            yield head;
-            const tail = trampoline(
-              evaluator.evaluate(node.tail, idContinuation),
-            );
+        const consState: InternalConsState = {
+          head,
+          tailExpr: node.tail,
+          evaluator,
+          realizedTail: undefined,
+        };
 
-            if (Array.isArray(tail)) {
-              for (const item of tail) yield item;
-              return;
+        const consList: LazyList = {
+          type: "LazyList",
+          generator: function* () {
+            let current: any = consState;
+
+            while (current !== undefined && current !== null) {
+              if (current.tailExpr !== undefined) {
+                yield current.head;
+
+                if (current.realizedTail === undefined) {
+                  current.realizedTail = trampoline(
+                    current.evaluator.evaluate(
+                      current.tailExpr,
+                      idContinuation,
+                    ),
+                  );
+                }
+                current = current.realizedTail;
+              } else if (isLazyList(current)) {
+                const memoized = current;
+                if (isMemoizedList(memoized) && memoized._consState) {
+                  current = memoized._consState;
+                } else {
+                  const iter = current.generator();
+                  let step = iter.next();
+                  while (!step.done) {
+                    yield step.value;
+                    step = iter.next();
+                  }
+                  break;
+                }
+              } else if (
+                Array.isArray(current) ||
+                typeof current === "string"
+              ) {
+                for (const x of current) yield x;
+                break;
+              } else {
+                throw new Error(
+                  `Invalid tail type for Cons: ${typeof current}`,
+                );
+              }
             }
+          },
+        };
 
-            if (typeof tail === "string") {
-              for (const char of tail) yield char;
-              return;
-            }
+        const memoized = createMemoizedStream(() => consList.generator());
 
-            if (isLazyList(tail)) {
-              yield* tail.generator();
-              return;
-            }
+        memoized._consState = consState;
 
-            throw new Error(`Invalid tail type for Cons: ${typeof tail}`);
-          }),
-        );
+        return k(memoized);
       }
 
       // Eager behavior
       return evaluator.evaluate(node.tail, (tail) => {
-        if (typeof tail === "string") {
-          return k((head as string) + tail);
-        }
+        if (typeof tail === "string") return k((head as string) + tail);
         if (isLazyList(tail) || !Array.isArray(tail))
           throw new Error("Expected Array in eager Cons");
         return k([head, ...tail]);

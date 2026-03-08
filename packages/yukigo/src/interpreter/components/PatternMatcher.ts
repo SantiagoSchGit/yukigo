@@ -4,6 +4,7 @@ import {
   ASTNode,
   ConsPattern,
   ConstructorPattern,
+  Expression,
   FunctorPattern,
   isLazyList,
   LazyList,
@@ -21,7 +22,8 @@ import {
 import { Bindings } from "../index.js";
 import { InterpreterVisitor } from "./Visitor.js";
 import { CPSThunk, Thunk, Continuation } from "../trampoline.js";
-import { LazyRuntime } from "./runtimes/LazyRuntime.js";
+import { RuntimeContext } from "./RuntimeContext.js";
+import { ExpressionEvaluator } from "../utils.js";
 
 class SharedSequence {
   private cache: PrimitiveValue[] = [];
@@ -52,19 +54,27 @@ class SharedSequence {
     return { value: this.cache[index], done: false };
   }
 }
+export interface InternalConsState {
+  readonly head: PrimitiveValue;
+  readonly tailExpr: Expression;
+  readonly evaluator: ExpressionEvaluator;
+  realizedTail?: PrimitiveValue;
+}
 
 export interface MemoizedLazyList extends LazyList {
   _sequence: SharedSequence;
   _offset: number;
+  _consState?: InternalConsState;
   toJSON: () => any;
 }
 
-export function isMemoizedList(list: any): list is MemoizedLazyList {
+export function isMemoizedList(list: unknown): list is MemoizedLazyList {
   return (
     list &&
     typeof list === "object" &&
-    list.type === "LazyList" &&
-    list._sequence instanceof SharedSequence
+    "type" in list &&
+    "_offset" in list &&
+    "_sequence" in list
   );
 }
 
@@ -176,7 +186,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
   constructor(
     private value: PrimitiveValue,
     private bindings: Bindings,
-    private lazyRuntime: LazyRuntime,
+    private ctx: RuntimeContext,
   ) {}
 
   visitVariablePattern(node: VariablePattern): CPSThunk<boolean> {
@@ -208,7 +218,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
           const matcher = new PatternMatcher(
             val[index],
             this.bindings,
-            this.lazyRuntime,
+            this.ctx,
           );
           return node.elements[index].accept(matcher)((isMatch) => {
             if (!isMatch) return k(false);
@@ -219,7 +229,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       };
 
       if (isLazyList(this.value)) {
-        return this.lazyRuntime.realizeList(this.value, (val) => {
+        return this.ctx.lazyRuntime.realizeList(this.value, (val) => {
           return () => processValue(val);
         });
       }
@@ -253,7 +263,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       if (typeof value === "string") return finishMatching(value.split(""));
 
       if (isLazyList(value)) {
-        return this.lazyRuntime.realizeList(value, (valArr) => {
+        return this.ctx.lazyRuntime.realizeList(value, (valArr) => {
           return () => finishMatching(valArr);
         });
       }
@@ -270,11 +280,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
     if (value.length !== elements.length) return k(false);
     const matchNext = (index: number): Thunk<boolean> => {
       if (index >= elements.length) return k(true);
-      const matcher = new PatternMatcher(
-        value[index],
-        this.bindings,
-        this.lazyRuntime,
-      );
+      const matcher = new PatternMatcher(value[index], this.bindings, this.ctx);
       return elements[index].accept(matcher)((isMatch) => {
         if (!isMatch) return k(false);
         return () => matchNext(index + 1);
@@ -288,29 +294,42 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       const [head, tail] = this.resolveCons(this.value);
       if (head === null || tail === null) return k(false);
 
-      const headMatcher = new PatternMatcher(
-        head,
-        this.bindings,
-        this.lazyRuntime,
-      );
+      const headMatcher = new PatternMatcher(head, this.bindings, this.ctx);
       return node.left.accept(headMatcher)((headMatches) => {
         if (!headMatches) return k(false);
-        const tailMatcher = new PatternMatcher(
-          tail,
-          this.bindings,
-          this.lazyRuntime,
-        );
+        const tailMatcher = new PatternMatcher(tail, this.bindings, this.ctx);
         return node.right.accept(tailMatcher)(k);
       });
     };
   }
 
   private resolveCons(list: PrimitiveValue): [PrimitiveValue, PrimitiveValue] {
-    if (Array.isArray(list))
-      return list.length === 0 ? [null, null] : [list[0], list.slice(1)];
+    if (Array.isArray(list)) {
+      if (list.length === 0) return [null, null];
+      const isLazy = this.ctx.config.lazyLoading;
+      if (!isLazy) return [list[0], list.slice(1)];
+      const tail: LazyList = {
+        type: "LazyList",
+        generator: function* () {
+          for (let i = 1; i < list.length; i++) yield list[i];
+        },
+      };
+      return [list[0], tail];
+    }
 
-    if (typeof list === "string")
-      return list.length === 0 ? [null, null] : [list[0], list.slice(1)];
+    if (typeof list === "string") {
+      if (list.length === 0) return [null, null];
+
+      const isLazy = this.ctx.config.lazyLoading;
+      if (!isLazy) return [list[0], list.slice(1)];
+      const tail: LazyList = {
+        type: "LazyList",
+        generator: function* () {
+          for (let i = 1; i < list.length; i++) yield list[i];
+        },
+      };
+      return [list[0], tail];
+    }
 
     // lazy list case
     if (isLazyList(list)) {
@@ -365,14 +384,14 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       const innerMatcher = new PatternMatcher(
         this.value,
         this.bindings,
-        this.lazyRuntime,
+        this.ctx,
       );
       return node.right.accept(innerMatcher)((innerMatches) => {
         if (!innerMatches) return k(false);
         const aliasMatcher = new PatternMatcher(
           this.value,
           this.bindings,
-          this.lazyRuntime,
+          this.ctx,
         );
         return node.left.accept(aliasMatcher)(k);
       });
@@ -385,11 +404,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
         if (index >= node.elements.length) return k(false);
         const pattern = node.elements[index];
         const trialBindings: Bindings = [];
-        const matcher = new PatternMatcher(
-          this.value,
-          trialBindings,
-          this.lazyRuntime,
-        );
+        const matcher = new PatternMatcher(this.value, trialBindings, this.ctx);
         return pattern.accept(matcher)((isMatch) => {
           if (isMatch) {
             this.bindings.push(...trialBindings);
@@ -435,9 +450,9 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
     };
 
     if (isLazyList(a) || isLazyList(b)) {
-      return this.lazyRuntime.realizeList(a, (valA) => {
+      return this.ctx.lazyRuntime.realizeList(a, (valA) => {
         return () =>
-          this.lazyRuntime.realizeList(b, (valB) => {
+          this.ctx.lazyRuntime.realizeList(b, (valB) => {
             return () => compareValues(valA, valB);
           });
       });

@@ -31,6 +31,7 @@ import { LogicTranslator } from "./LogicTranslator.js";
 import { trampoline, Continuation, Thunk } from "../../trampoline.js";
 import { RuntimeContext, LogicSearchMode } from "../RuntimeContext.js";
 import { inspect } from "util";
+import { PatternResolver } from "../PatternMatcher.js";
 
 export type LogicExecutable = Expression | Statement | Goal | Exist | Findall;
 
@@ -206,7 +207,11 @@ export class LogicEngine {
     onSuccess: SuccessCont,
     onFailure: FailureCont,
   ): Thunk<any> {
+    if (this.context.config.debug)
+      console.log(`[LogicEngine] Solving conjunction.`);
     if (nodes.length === 0) {
+      if (this.context.config.debug)
+        console.log(`[LogicEngine] Nothing else to solve. Success.`);
       return onSuccess(substs, onFailure);
     }
 
@@ -229,17 +234,9 @@ export class LogicEngine {
     onSuccess: SuccessCont,
     onFailure: FailureCont,
   ): Thunk<any> {
-    if (this.isLogicGoal(node)) {
+    if (this.isLogicGoal(node))
       return () => this.solveLogicGoal(node, substs, onSuccess, onFailure);
-    } else {
-      return () =>
-        this.solveCondition(
-          node as Expression | Statement,
-          substs,
-          onSuccess,
-          onFailure,
-        );
-    }
+    return () => this.solveCondition(node, substs, onSuccess, onFailure);
   }
 
   private solveLogicGoal(
@@ -266,6 +263,11 @@ export class LogicEngine {
           this.solveConjunction(body, s, onSucc, onFail),
         onSuccess,
         onFailure,
+      );
+    }
+    if (this.context.config.debug) {
+      console.log(
+        `[LogicEngine] Solving logic goal: ${goal.identifier.value}.`,
       );
     }
 
@@ -381,7 +383,15 @@ export class LogicEngine {
       nodes,
       substs,
       (s, next) => {
+        if (this.context.config.debug)
+          console.log(
+            `[LogicEngine] Pushing { ${Array.from(s).map(([k, pat]) => `${k} -> ${pat.accept(new PatternResolver())}`)} } to results`,
+          );
         results.push(s);
+        if (this.context.config.debug)
+          console.log(
+            `[LogicEngine] Collected results: ${results.map((s) => `{ ${Array.from(s).map(([k, pat]) => `${k} -> ${pat.accept(new PatternResolver())}`)} }`)}`,
+          );
         return next;
       },
       () => k(results),

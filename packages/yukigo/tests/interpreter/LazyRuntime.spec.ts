@@ -40,15 +40,16 @@ const list = (elements: Expression[]) => new ListPrimitive(elements);
 const cons = (headVal: Expression, tailVal: Expression): ConsExpression =>
   new ConsExpression(headVal, tailVal);
 
-const context = new RuntimeContext({ lazyLoading: true });
+const lazyContext = new RuntimeContext({ lazyLoading: true });
+const eagerContext = new RuntimeContext({ lazyLoading: false });
 describe("LazyRuntime", () => {
   let evaluator: ExpressionEvaluator;
   let lazyRuntime: LazyRuntime;
-  beforeEach(() => {
-    evaluator = new InterpreterVisitor(context);
-    lazyRuntime = new LazyRuntime(context);
-  });
   describe("realizeList", () => {
+    beforeEach(() => {
+      evaluator = new InterpreterVisitor(lazyContext);
+      lazyRuntime = new LazyRuntime(eagerContext);
+    });
     it("should return the array as-is if input is already an array", () => {
       const input = [1, 2, 3];
       const result = trampoline(lazyRuntime.realizeList(input, idContinuation));
@@ -77,6 +78,10 @@ describe("LazyRuntime", () => {
 
   describe("evaluateRange", () => {
     describe("Finite Ranges", () => {
+      beforeEach(() => {
+        evaluator = new InterpreterVisitor(eagerContext);
+        lazyRuntime = new LazyRuntime(eagerContext);
+      });
       it("should create a simple range [1..5]", () => {
         const node = range(1, 5);
         const result = trampoline(
@@ -112,6 +117,10 @@ describe("LazyRuntime", () => {
     });
 
     describe("Infinite Ranges", () => {
+      beforeEach(() => {
+        evaluator = new InterpreterVisitor(lazyContext);
+        lazyRuntime = new LazyRuntime(lazyContext);
+      });
       it("should return a LazyList object", () => {
         const node = range(1);
         const result = trampoline(
@@ -165,7 +174,9 @@ describe("LazyRuntime", () => {
         const node = cons(num(1), lazyListMock);
 
         expect(() =>
-          trampoline(lazyRuntimeEager.evaluateCons(node, eagerEvaluator, idContinuation)),
+          trampoline(
+            lazyRuntimeEager.evaluateCons(node, eagerEvaluator, idContinuation),
+          ),
         ).to.throw(/Expected Array in eager Cons/);
       });
     });
