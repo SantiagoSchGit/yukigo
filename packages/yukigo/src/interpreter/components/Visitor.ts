@@ -353,6 +353,9 @@ export class InterpreterVisitor
     node: ListBinaryOperation,
   ): CPSThunk<PrimitiveValue> {
     if (node.operator === "Concat") {
+      if (this.context.config.lazyLoading) {
+        return (k) => this.context.lazyRuntime.evaluateConcatLazy(node, this, k);
+      }
       return (k) =>
         this.evaluate(node.left, (left) => {
           return () =>

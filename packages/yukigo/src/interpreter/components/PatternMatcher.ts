@@ -26,7 +26,7 @@ import { Bindings } from "../index.js";
 import { InterpreterVisitor } from "./Visitor.js";
 import { CPSThunk, Thunk, Continuation } from "../trampoline.js";
 import { RuntimeContext } from "./RuntimeContext.js";
-import { ExpressionEvaluator } from "../utils.js";
+import { ExpressionEvaluator, getYukigoType } from "../utils.js";
 
 class SharedSequence {
   private cache: PrimitiveValue[] = [];
@@ -213,7 +213,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
   visitLiteralPattern(node: LiteralPattern): CPSThunk<boolean> {
     return (k) => {
       const literalValue = InterpreterVisitor.evaluateLiteral(node.name);
-      return this.deepEqual(this.value, literalValue, k);
+      return this.ctx.lazyRuntime.deepEqual(this.value, literalValue, k);
     };
   }
 
@@ -273,7 +273,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       if (typeof value === "string") return finishMatching(value.split(""));
 
       if (isLazyList(value)) {
-        return this.lazyRuntime.realizeList(value, (valArr) => {
+        return this.ctx.lazyRuntime.realizeList(value, (valArr) => {
           return () => finishMatching(valArr);
         });
       }
@@ -293,7 +293,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       const matcher = new PatternMatcher(
         value[index],
         this.bindings,
-        this.lazyRuntime,
+        this.ctx,
       );
       return elements[index].accept(matcher)((isMatch) => {
         if (!isMatch) return k(false);
@@ -311,14 +311,14 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       const headMatcher = new PatternMatcher(
         head,
         this.bindings,
-        this.lazyRuntime,
+        this.ctx,
       );
       return node.left.accept(headMatcher)((headMatches) => {
         if (!headMatches) return k(false);
         const tailMatcher = new PatternMatcher(
           tail,
           this.bindings,
-          this.lazyRuntime,
+          this.ctx,
         );
         return node.right.accept(tailMatcher)(k);
       });
@@ -344,7 +344,7 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
         const innerMatcher = new PatternMatcher(
           this.value,
           this.bindings,
-          this.lazyRuntime,
+          this.ctx,
         );
         return node.innerPattern.accept(innerMatcher)(k);
       }
@@ -380,9 +380,6 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
       };
       return [list[0], tail];
     }
-
-    if (typeof list === "string")
-      return list.length === 0 ? [null, null] : [list[0], list.slice(1)];
 
     // lazy list case
     if (isLazyList(list)) {
@@ -472,13 +469,5 @@ export class PatternMatcher implements Visitor<CPSThunk<boolean>> {
 
   visit(node: ASTNode): CPSThunk<boolean> {
     return node.accept(this);
-  }
-
-  private deepEqual(
-    a: PrimitiveValue,
-    b: PrimitiveValue,
-    k: Continuation<boolean>,
-  ): Thunk<boolean> {
-    return this.lazyRuntime.deepEqual(a, b, k);
   }
 }

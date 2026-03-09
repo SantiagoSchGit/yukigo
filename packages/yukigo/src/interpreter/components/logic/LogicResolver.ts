@@ -50,11 +50,12 @@ import {
   NilPrimitive,
   CharPrimitive,
   Visitor,
+  isUnguardedBody,
+  GuardedBody,
 } from "yukigo-ast";
-import { lookup } from "../../utils.js";
-import { InterpreterError } from "../../errors.js";
 import { Thunk } from "../../trampoline.js";
 import { LogicExecutable } from "./LogicEngine.js";
+import { RuntimeContext } from "../RuntimeContext.js";
 
 /**
  * A Substitution maps variable names to their bound patterns.

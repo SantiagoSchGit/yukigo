@@ -5,6 +5,11 @@ import {
   Environment,
   EnvStack,
   ASTNode,
+  isRuntimeFunction,
+  isRuntimeObject,
+  isLazyList,
+  isRuntimeClass,
+  isRuntimePredicate,
 } from "yukigo-ast";
 import { UnboundVariable } from "./errors.js";
 import { Continuation, Thunk } from "./trampoline.js";
@@ -63,4 +68,17 @@ export function createGlobalEnv(): EnvStack {
     head: new Map<string, PrimitiveValue>(),
     tail: null,
   };
+}
+
+export function getYukigoType(val: PrimitiveValue): string {
+  if (val === null || val === undefined) return "YuNil";
+  if (typeof val === "number") return "YuNumber";
+  if (typeof val === "boolean") return "YuBoolean";
+  if (typeof val === "string") return val.length === 1 ? "YuChar" : "YuString";
+  if (Array.isArray(val) || isLazyList(val)) return "YuList";
+  if (isRuntimeFunction(val)) return "YuFunction";
+  if (isRuntimeObject(val)) return "YuObject";
+  if (isRuntimeClass(val)) return "YuClass";
+  if (isRuntimePredicate(val)) return "YuPredicate";
+  return "YuUnknown";
 }

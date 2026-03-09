@@ -118,6 +118,8 @@ export class LazyRuntime {
     evaluator: ExpressionEvaluator,
     k: Continuation<PrimitiveValue>,
   ): Thunk<PrimitiveValue> {
+    const capturedEnv = this.context.env;
+    const ctx = this.context;
     return evaluator.evaluate(node.head, (head) => {
       if (this.context.config.lazyLoading) {
         const consState: InternalConsState = {
@@ -137,12 +139,18 @@ export class LazyRuntime {
                 yield current.head;
 
                 if (current.realizedTail === undefined) {
-                  current.realizedTail = trampoline(
-                    current.evaluator.evaluate(
-                      current.tailExpr,
-                      idContinuation,
-                    ),
-                  );
+                  const prevEnv = ctx.env;
+                  ctx.setEnv(capturedEnv);
+                  try {
+                    current.realizedTail = trampoline(
+                      current.evaluator.evaluate(
+                        current.tailExpr,
+                        idContinuation,
+                      ),
+                    );
+                  } finally {
+                    ctx.setEnv(prevEnv);
+                  }
                 }
                 current = current.realizedTail;
               } else if (isLazyList(current)) {
@@ -228,20 +236,64 @@ export class LazyRuntime {
     evaluator: ExpressionEvaluator,
     k: Continuation<PrimitiveValue>,
   ): Thunk<PrimitiveValue> {
+    const capturedEnv = this.context.env;
+    const ctx = this.context;
     return k(
       createMemoizedStream(function* () {
-        const left = trampoline(evaluator.evaluate(node.left, idContinuation));
-        if (Array.isArray(left)) yield* left;
-        else if (typeof left === "string") yield* left.split("");
-        else if (isLazyList(left)) yield* left.generator();
+        const prevEnv = ctx.env;
+        ctx.setEnv(capturedEnv);
+        try {
+          const left = trampoline(evaluator.evaluate(node.left, idContinuation));
+          if (Array.isArray(left)) yield* left;
+          else if (typeof left === "string") yield* left.split("");
+          else if (isLazyList(left)) yield* left.generator();
 
-        const right = trampoline(
-          evaluator.evaluate(node.right, idContinuation),
-        );
-        if (Array.isArray(right)) yield* right;
-        else if (typeof right === "string") yield* right.split("");
-        else if (isLazyList(right)) yield* right.generator();
+          const right = trampoline(
+            evaluator.evaluate(node.right, idContinuation),
+          );
+          if (Array.isArray(right)) yield* right;
+          else if (typeof right === "string") yield* right.split("");
+          else if (isLazyList(right)) yield* right.generator();
+        } finally {
+          ctx.setEnv(prevEnv);
+        }
       }),
     );
+  }
+  public deepEqual<R = boolean>(
+    a: PrimitiveValue,
+    b: PrimitiveValue,
+    k: Continuation<boolean, R>,
+  ): Thunk<R> {
+    if (a === b) return k(true);
+
+    const compareValues = (valA: any, valB: any): Thunk<R> => {
+      if (typeof valA === "string" && typeof valB === "string")
+        return k(valA === valB);
+
+      if (Array.isArray(valA) && Array.isArray(valB)) {
+        if (valA.length !== valB.length) return k(false);
+        const compareNext = (index: number): Thunk<R> => {
+          if (index >= valA.length) return k(true);
+          return () =>
+            this.deepEqual(valA[index], valB[index], (isEqual) => {
+              if (!isEqual) return k(false);
+              return () => compareNext(index + 1);
+            });
+        };
+        return compareNext(0);
+      }
+
+      return k(valA == valB);
+    };
+
+    if (isLazyList(a) || isLazyList(b)) {
+      return this.realizeList(a, (valA) => {
+        return () =>
+          this.realizeList(b, (valB) => {
+            return () => compareValues(valA, valB);
+          });
+      });
+    }
   }
 }

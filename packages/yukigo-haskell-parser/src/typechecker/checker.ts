@@ -8,6 +8,7 @@ import {
   TestGroup,
   Test,
   Assert,
+  ASTNode,
 } from "yukigo-ast";
 import { InferenceEngine, PatternVisitor } from "./inference.js";
 import { CoreHM } from "./core.js";

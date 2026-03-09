@@ -62,8 +62,15 @@ export class FunctionRuntime {
           );
 
         const localEnv = new Map<string, PrimitiveValue>(bindings);
+        const oldEnv = this.context.env;
         if (func.closure) this.context.setEnv(func.closure);
         this.context.pushEnv(localEnv);
+
+        const wrappedK = (res: PrimitiveValue) => {
+          this.context.setEnv(oldEnv);
+          return k(res);
+        };
+
         const evaluatorFactory: EvaluatorFactory = (ctx) =>
           new InterpreterVisitor(ctx);
 
@@ -75,7 +82,7 @@ export class FunctionRuntime {
             body.sequence,
             this.context,
             evaluatorFactory,
-            k,
+            wrappedK,
           );
 
         // GuardedBody
@@ -87,8 +94,10 @@ export class FunctionRuntime {
           }
 
           const tryNextGuard = (guardIndex: number): Thunk<PrimitiveValue> => {
-            if (guardIndex >= body.length)
+            if (guardIndex >= body.length) {
+              this.context.setEnv(oldEnv);
               return () => tryNextEquation(eqIndex + 1);
+            }
 
             const evaluator = evaluatorFactory(this.context);
             const guard = body[guardIndex];
@@ -96,13 +105,13 @@ export class FunctionRuntime {
               if (cond !== true) return () => tryNextGuard(guardIndex + 1);
 
               if (!(guard.body instanceof Sequence))
-                return evaluator.evaluate(guard.body, k);
+                return evaluator.evaluate(guard.body, wrappedK);
 
               return this.evaluateSequence(
                 guard.body,
                 this.context,
                 evaluatorFactory,
-                k,
+                wrappedK,
               );
             });
           };
