@@ -55,7 +55,7 @@ export class LogicEngine {
     return this.handleOutputMode(generator);
   }
   public solveNot(node: Not): PrimitiveValue {
-    const generator = this.solveConjunction(node.expressions, new Map());
+    const generator = this.solveConjunction([node.expression], new Map());
     const result = generator.next();
     return result.done === true;
   }
