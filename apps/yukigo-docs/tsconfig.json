@@ -36,9 +36,6 @@
   "references": [
     {
       "path": "../../packages/yukigo-prolog-parser"
-    },
-    {
-      "path": "../../packages/yukigo-haskell-parser"
     }
   ]
 }

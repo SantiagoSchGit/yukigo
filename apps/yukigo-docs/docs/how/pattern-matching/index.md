@@ -15,7 +15,7 @@ If we load that code into the `Interpreter` and evaluate the following expressio
 describeNumber 0
 ```
 
-It will match the two literal values because `0` is a [LiteralPattern](../ast/Patterns/LiteralPattern.md)
+It will match the two literal values because `0` is a [LiteralPattern](../../ast/Patterns/LiteralPattern.md)
 
 ```text
 [EnvBuilder] Defining function: `describeNumber`
@@ -31,7 +31,7 @@ But if we try with another string instead
 describeNumber 10
 ```
 
-The `Interpreter` will not match to `0`, instead it will **bind** `x -> 10` because `x` is a [VariablePattern](../ast/Patterns/VariablePattern.md) 
+The `Interpreter` will not match to `0`, instead it will **bind** `x -> 10` because `x` is a [VariablePattern](../../ast/Patterns/VariablePattern.md) 
 
 ```text
 [EnvBuilder] Defining function: `describeNumber`
