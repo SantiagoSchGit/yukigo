@@ -69,7 +69,7 @@ forall -> %forallRule "(" _ expression _ %comma _ expression _ ")" {% (d) => new
 findall -> %findallRule "(" _ expression _ %comma _ expression _ %comma _ expression _ ")" {% (d) => new Findall(d[3], d[7], d[11]) %}
 
 not -> 
-    %notOperator _ expression {% (d) => new Not([d[2]]) %}
+    %notOperator _ expression {% (d) => new Not(d[2]) %}
 
 exist -> 
     "call" %lparen _ pattern_list _ %rparen {% (d) => {
