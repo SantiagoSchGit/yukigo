@@ -1,4 +1,4 @@
-# ❄️ Yukigo
+# ❄️ Yukigo / 雪語
 A universal, multi-language, multi-paradigm code analyzer highly inspired in [mulang](https://github.com/mumuki/mulang)
 
 ## Components
